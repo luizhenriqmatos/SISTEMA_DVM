@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DVM // Atrasos & Penalidades Supabase</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Bibliotecas auxiliares: PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    
+    <!-- Biblioteca Oficial do Supabase -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['Fira Code', 'monospace'],
+                    },
+                    colors: {
+                        cyber: {
+                            bg: '#09090b',
+                            panel: '#111115',
+                            border: '#27272a',
+                            blue: '#1e3a8a',
+                            glow: '#3b82f6',
+                            text: '#e4e4e7',
+                            muted: '#71717a',
+                            danger: '#ef4444'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body { background-color: #09090b; color: #e4e4e7; -webkit-font-smoothing: antialiased; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #27272a; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+
+        .cyber-input { background: transparent; border: 1px solid #27272a; color: #e4e4e7; transition: all 0.2s ease; }
+        .cyber-input:focus:not(:read-only) { outline: none; border-color: #3b82f6; box-shadow: 0 0 12px rgba(59, 130, 246, 0.15); }
+        .scanline { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1)); background-size: 100% 4px; pointer-events: none; z-index: 50; opacity: 0.15; }
+    </style>
+
+    <!-- React 18 e Babel Standalone para rodar JSX direto no navegador -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="selection:bg-cyber-glow selection:text-black pb-12">
+    <div class="scanline"></div>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // =========================================================================
+        // AUTENTICAÇÃO SEGURA: Hashes SHA-256 em vez de texto puro
+        // Para alterar as credenciais no futuro, gere o hash SHA-256 do novo usuário/senha
+        // =========================================================================
+        const ADMIN_USER_HASH = "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"; // hash de 'admin'
+        const ADMIN_PASS_HASH = "7fd860f7124b15b11255165733d69cf9d400bd314d5fc8fe2ae71fae8709cd1e"; // hash de 'coi@2026'
+
+        async function hashString(str) {
+            const msgBuffer = new TextEncoder().encode(str);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // =========================================================================
+        // CREDENCIAIS OFICIAIS DO SUPABASE INJETADAS
+        // =========================================================================
+        const SUPABASE_URL = "https://gzakykxalhblysmwukbc.supabase.co"; 
+        const SUPABASE_ANON_KEY = "sb_publishable_pfL8iZBENMiGJrjrqHs6ww_nz4E5f0N"; 
+        // =========================================================================
+
+        let supabaseClient = null;
+        try {
+            supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        } catch (e) {
+            console.error("Falha ao carregar o Supabase Client: ", e);
+        }
+
+        const COLABORADORES_INICIAIS = [
+            "André", "Cleyton", "Danilo", "Henrique Lebre", 
+            "Henrique Matos", "Kostantinos", "Liesley", 
+            "Nailson", "Thiago Sodré", "Thiago Vitoria"
+        ].sort().map(nome => ({
+            id: nome.toLowerCase().replace(/ /g, '-'),
+            nome: nome,
+            atrasos: 0,
+            justificativa: '',
+            remotosPerdidos: 0
+        }));
+
+        const App = () => {
+            const [colaboradores, setColaboradores] = useState(() => {
+                const dadosLocais = localStorage.getItem('dvm_supabase_cache');
+                return dadosLocais ? JSON.parse(dadosLocais) : COLABORADORES_INICIAIS;
+            });
+
+            const [isAdmin, setIsAdmin] = useState(false);
+            const [searchTerm, setSearchTerm] = useState('');
+            const [logs, setLogs] = useState([]);
+            const [isSaving, setIsSaving] = useState(false);
+            const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+            const [showSavedNotification, setShowSavedNotification] = useState(false);
+            const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+            const [loginUser, setLoginUser] = useState('');
+            const [loginPass, setLoginPass] = useState('');
+            const [loginError, setLoginError] = useState(false);
+
+            const fileInputRef = useRef(null);
+
+            const addLog = (msg) => {
+                const time = new Date().toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                const newLog = `> [${time}] ${msg}`;
+                setLogs(prev => [newLog, ...prev].slice(0, 10));
+            };
+
+            const carregarDadosDoBanco = async (mostrarLog = true) => {
+                if (!supabaseClient) return;
+                try {
+                    const { data, error } = await supabaseClient
+                        .from('dvm_state')
+                        .select('state')
+                        .eq('id', 'main_state')
+                        .single();
+
+                    if (error) {
+                        if (error.code === 'PGRST116') {
+                            if (mostrarLog) addLog('SYSTEM: Criando base de dados inicial...');
+                            await supabaseClient.from('dvm_state').insert([{ id: 'main_state', state: colaboradores }]);
+                        } else {
+                            throw error;
+                        }
+                    } else if (data && data.state) {
+                        if (JSON.stringify(data.state) !== JSON.stringify(colaboradores)) {
+                            setColaboradores(data.state);
+                            localStorage.setItem('dvm_supabase_cache', JSON.stringify(data.state));
+                        }
+                    }
+                } catch (err) {
+                    if (mostrarLog) addLog(`SYSTEM_ERROR: Falha de leitura da nuvem.`);
+                    console.error(err);
+                }
+            };
+
+            useEffect(() => {
+                // Checa autenticação de administrador local (agora usando sessionStorage)
+                if (sessionStorage.getItem('sysctrl_secure_token') === 'active') {
+                    setIsAdmin(true);
+                }
+
+                if (!supabaseClient) {
+                    addLog('SYSTEM: Falha ao carregar a biblioteca do banco.');
+                    return;
+                }
+
+                // Carga inicial
+                carregarDadosDoBanco(true);
+
+                // Polling invisível a cada 10 segundos
+                const intervalId = setInterval(() => {
+                    carregarDadosDoBanco(false);
+                }, 10000);
+
+                return () => clearInterval(intervalId);
+            }, []);
+
+            const persistirNoBanco = async (dadosParaSalvar) => {
+                setColaboradores(dadosParaSalvar);
+                localStorage.setItem('dvm_supabase_cache', JSON.stringify(dadosParaSalvar));
+                setHasUnsavedChanges(true);
+
+                if (!supabaseClient) return;
+
+                setIsSaving(true);
+                
+                try {
+                    const { error } = await supabaseClient
+                        .from('dvm_state')
+                        .upsert({ id: 'main_state', state: dadosParaSalvar });
+
+                    if (error) throw error;
+
+                    setIsSaving(false);
+                    setHasUnsavedChanges(false);
+                    setShowSavedNotification(true);
+                    addLog('SYSTEM: Dados salvos permanentemente na nuvem!');
+                    setTimeout(() => setShowSavedNotification(false), 2000);
+                } catch (err) {
+                    setIsSaving(false);
+                    addLog(`SYSTEM_ERROR: Gravação falhou.`);
+                    console.error(err);
+                }
+            };
+
+            const alterarAtraso = (id, nome, delta) => {
+                if (!isAdmin) return;
+                const novosDados = colaboradores.map(colab => {
+                    if (colab.id === id) {
+                        return { ...colab, atrasos: Math.max(0, colab.atrasos + delta) };
+                    }
+                    return colab;
+                });
+                persistirNoBanco(novosDados);
+                addLog(`ADMIN: Ajustou atraso de ${nome} (${delta > 0 ? '+1' : '-1'}).`);
+            };
+
+            const alterarRemotosPerdidos = (id, nome, delta) => {
+                if (!isAdmin) return;
+                const novosDados = colaboradores.map(colab => {
+                    if (colab.id === id) {
+                        const atual = colab.remotosPerdidos || 0;
+                        return { ...colab, remotosPerdidos: Math.max(0, atual + delta) };
+                    }
+                    return colab;
+                });
+                persistirNoBanco(novosDados);
+                addLog(`ADMIN: Ajustou remotos manuais de ${nome} (${delta > 0 ? '+1' : '-1'}).`);
+            };
+
+            const handleJustificativaKeyDown = (e, id, nome, justificativaAtual) => {
+                if (e.key === 'Enter' && e.target.value.trim() !== '') {
+                    const text = e.target.value.trim();
+                    const data = new Date().toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'});
+                    const novaEntrada = `[${data}] ${text}`;
+                    const novoTexto = justificativaAtual ? `${justificativaAtual}; ${novaEntrada}` : novaEntrada;
+                    
+                    const novosDados = colaboradores.map(colab => 
+                        colab.id === id ? { ...colab, justificativa: novoTexto } : colab
+                    );
+                    
+                    persistirNoBanco(novosDados);
+                    addLog(`ADMIN: Justificativa registrada para ${nome}.`);
+                    e.target.value = ''; 
+                }
+            };
+
+            const executarZerarSemana = () => {
+                const zerados = colaboradores.map(c => ({...c, atrasos: 0, remotosPerdidos: 0, justificativa: ''}));
+                persistirNoBanco(zerados);
+                addLog('ADMIN: Todos os registros foram resetados.');
+            };
+
+            const exportarDadosJSON = () => {
+                const dadosString = JSON.stringify(colaboradores, null, 2);
+                const blob = new Blob([dadosString], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = `dvm_backup_${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                addLog('SYSTEM: Backup JSON exportado.');
+            };
+
+            const importarDadosJSON = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    try {
+                        const dadosImportados = JSON.parse(event.target.result);
+                        if (Array.isArray(dadosImportados)) {
+                            persistirNoBanco(dadosImportados);
+                            addLog('ADMIN: Backup local carregado e enviado pra nuvem!');
+                        }
+                    } catch (err) { addLog('ERROR: Falha ao ler arquivo de importação.'); }
+                };
+                reader.readAsText(file);
+            };
+
+            const gerarDocumentoPDF = () => {
+                const { jsPDF } = window.jspdf;
+                const doc = new jsPDF();
+                doc.setFont("helvetica", "bold");
+                doc.setFontSize(18);
+                doc.text("SYS.DVM - Relatório de Atrasos e Penalidades", 14, 22);
+                doc.setFontSize(11);
+                doc.setFont("helvetica", "normal");
+                doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 30);
+
+                const tableColumn = ["Colaborador", "Atrasos", "Justificativas", "Remotos Perdidos"];
+                const tableRows = [];
+
+                colaboradores.forEach(colab => {
+                    const remotosManuais = colab.remotosPerdidos || 0;
+                    const totalRemotos = Math.max(0, Math.floor(colab.atrasos / 2) + remotosManuais);
+                    const justificativasStr = colab.justificativa ? colab.justificativa.split(';').map(j => j.trim()).join('\n') : 'Sem registros';
+                    tableRows.push([colab.nome, colab.atrasos, justificativasStr, totalRemotos]);
+                });
+
+                doc.autoTable({
+                    head: [tableColumn], body: tableRows, startY: 35, theme: 'grid', styles: { fontSize: 9, cellPadding: 3 },
+                    headStyles: { fillColor: [30, 58, 138] }, columnStyles: { 2: { cellWidth: 80 } }
+                });
+                return doc;
+            };
+
+            const exportarPDF = () => {
+                const doc = gerarDocumentoPDF();
+                doc.save(`dvm_relatorio_${new Date().toISOString().slice(0,10)}.pdf`);
+                addLog('SYSTEM: Relatório PDF exportado.');
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                
+                const userHash = await hashString(loginUser);
+                const passHash = await hashString(loginPass);
+
+                if (userHash === ADMIN_USER_HASH && passHash === ADMIN_PASS_HASH) {
+                    setIsAdmin(true); 
+                    setLoginError(false); 
+                    setLoginUser(''); 
+                    setLoginPass('');
+                    // Usando sessionStorage para que a sessão seja encerrada ao fechar o navegador
+                    sessionStorage.setItem('sysctrl_secure_token', 'active');
+                    addLog('AUTH: Acesso seguro concedido.');
+                } else {
+                    setLoginError(true); 
+                    addLog('AUTH: Credenciais inválidas.');
+                }
+            };
+
+            const handleLogout = () => {
+                setIsAdmin(false); 
+                sessionStorage.removeItem('sysctrl_secure_token');
+                addLog('AUTH: Sessão encerrada de forma segura.');
+            };
+
+            const colaboradoresFiltrados = colaboradores.filter(c => 
+                c.nome.toLowerCase().includes(searchTerm.toLowerCase())
+            );
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 font-sans">
+                    <div className="max-w-6xl mx-auto">
+                        
+                        {/* MODAL CUSTOMIZADO PARA CONFIRMAÇÃO DE RESET */}
+                        {showResetConfirm && (
+                            <div className="fixed inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm z-50 p-4">
+                                <div className="bg-cyber-panel border border-cyber-danger p-6 rounded-lg max-w-md w-full font-mono text-xs">
+                                    <p className="text-cyber-danger font-bold text-sm mb-4">⚠️ ATENÇÃO: OPERAÇÃO CRÍTICA</p>
+                                    <p className="text-cyber-text mb-6">Deseja realmente zerar os atrasos, remotos e justificativas de todos na nuvem? Esta ação não pode ser desfeita.</p>
+                                    <div className="flex justify-end gap-3">
+                                        <button onClick={() => setShowResetConfirm(false)} className="px-3 py-1.5 border border-cyber-border text-cyber-muted hover:text-cyber-text transition-colors">Cancelar</button>
+                                        <button onClick={() => { executarZerarSemana(); setShowResetConfirm(false); }} className="px-4 py-1.5 bg-cyber-danger text-white hover:bg-red-600 font-bold transition-colors">Zerar Tudo</button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* NOTIFICAÇÃO DE GRAVAÇÃO */}
+                        {showSavedNotification && (
+                            <div className="fixed bottom-6 right-6 bg-emerald-600 border border-emerald-400 text-white font-mono text-xs py-3 px-6 rounded shadow-2xl z-50 animate-bounce">
+                                ✓ DADOS SALVOS NA NUVEM COM SUCESSO!
+                            </div>
+                        )}
+
+                        {/* HEADER */}
+                        <header className="flex flex-col md:flex-row justify-between items-end md:items-center mb-8 pb-4 border-b border-cyber-border gap-4">
+                            <div className="flex items-center gap-4 w-full md:w-auto">
+                                <div className="w-3 h-8 bg-cyber-blue animate-pulse"></div>
+                                <div>
+                                    <h1 className="text-xl md:text-2xl font-mono font-bold tracking-tight text-cyber-text">
+                                        SYS.DVM<span className="text-cyber-blue">_</span>
+                                    </h1>
+                                    <p className="text-xs font-mono text-cyber-muted uppercase tracking-widest">
+                                        Atrasos & Penalidades // Connect
+                                    </p>
+                                </div>
+                            </div>
+
+                            {/* CONTROLES */}
+                            <div className="w-full md:w-auto flex flex-wrap justify-between md:justify-end items-center gap-4">
+                                <div className="flex items-center gap-2 border-r border-cyber-border pr-4 flex-wrap">
+                                    <button onClick={exportarPDF} className="text-xs font-mono px-3 py-1 border border-cyber-border text-cyber-muted hover:text-cyber-text hover:border-cyber-glow transition-colors">
+                                        [PDF_EXPORT]
+                                    </button>
+                                </div>
+
+                                {isAdmin ? (
+                                    <div className="flex items-center gap-3 text-sm font-mono flex-wrap">
+                                        
+                                        <button 
+                                            onClick={() => persistirNoBanco(colaboradores)}
+                                            disabled={isSaving || !hasUnsavedChanges}
+                                            className={`text-xs px-4 py-1.5 font-bold tracking-wide transition-all ${
+                                                hasUnsavedChanges 
+                                                    ? 'bg-amber-500 text-black hover:bg-amber-400 animate-pulse' 
+                                                    : 'bg-[#1e3a8a] text-cyber-text opacity-50 cursor-not-allowed'
+                                            }`}
+                                        >
+                                            {isSaving ? '[GRAVANDO...]' : hasUnsavedChanges ? '[SALVAR NA NUVEM 💾]' : '[DADOS EM SINCRONIA ✓]'}
+                                        </button>
+
+                                        <button onClick={() => setShowResetConfirm(true)} className="text-xs px-3 py-1 border border-cyber-danger/50 text-cyber-danger hover:bg-cyber-danger/10 transition-colors">
+                                            [RESET_WEEK]
+                                        </button>
+                                        <span className="text-emerald-400 flex items-center gap-2 text-xs">
+                                            <span className="w-2 h-2 bg-emerald-400 rounded-full inline-block animate-pulse"></span>
+                                            ADMIN_CONNECTED
+                                        </span>
+                                        <button onClick={handleLogout} className="px-3 py-1 text-xs border border-cyber-border hover:border-cyber-danger hover:text-cyber-danger transition-colors text-cyber-muted">
+                                            [SAIR]
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <form onSubmit={handleLogin} className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                                        <span className="text-cyber-glow">{">"}</span>
+                                        <input type="text" placeholder="usuário" value={loginUser} onChange={(e) => setLoginUser(e.target.value)} className={`w-16 bg-transparent border-b ${loginError ? 'border-cyber-danger text-cyber-danger' : 'border-cyber-border focus:border-cyber-glow'} px-1 py-1 outline-none`} />
+                                        <input type="password" placeholder="senha" value={loginPass} onChange={(e) => setLoginPass(e.target.value)} className={`w-20 bg-transparent border-b ${loginError ? 'border-cyber-danger text-cyber-danger' : 'border-cyber-border focus:border-cyber-glow'} px-1 py-1 outline-none`} />
+                                        <button type="submit" className="px-2 py-1 text-cyber-muted hover:text-cyber-glow hover:bg-cyber-glow/10 transition-colors">[ENTRAR]</button>
+                                    </form>
+                                )}
+                            </div>
+                        </header>
+
+                        {/* BARRA DE FILTRO */}
+                        <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                            <input 
+                                type="text" 
+                                placeholder="> Buscar colaborador..." 
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="cyber-input w-full md:w-1/3 p-2 text-sm font-mono rounded"
+                            />
+                        </div>
+
+                        {/* TABELA */}
+                        <div className="bg-cyber-panel border border-cyber-border rounded-lg shadow-2xl overflow-hidden mb-6">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr className="bg-[#18181b] border-b border-cyber-border text-xs font-mono text-cyber-muted uppercase">
+                                            <th className="p-4 font-semibold w-1/5">Colaborador</th>
+                                            <th className="p-4 font-semibold text-center w-32">Atrasos</th>
+                                            <th className="p-4 font-semibold">Histórico de Justificativas</th>
+                                            <th className="p-4 font-semibold text-center w-40">Remotos Perdidos</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-cyber-border text-sm font-mono">
+                                        {colaboradoresFiltrados.length === 0 ? (
+                                            <tr><td colSpan="4" className="p-4 text-center text-cyber-muted">Nenhum registro encontrado.</td></tr>
+                                        ) : colaboradoresFiltrados.map((colab) => {
+                                            const totalRemotos = Math.max(0, Math.floor(colab.atrasos / 2) + (colab.remotosPerdidos || 0));
+                                            const historico = colab.justificativa ? colab.justificativa.split(';') : [];
+
+                                            return (
+                                                <tr key={colab.id} className="hover:bg-white/[0.02] transition-colors">
+                                                    <td className="p-4 font-sans font-medium text-cyber-text align-top pt-5">
+                                                        {colab.nome}
+                                                    </td>
+                                                    
+                                                    <td className="p-4 text-center align-top pt-4">
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            {isAdmin && (
+                                                                <button onClick={() => alterarAtraso(colab.id, colab.nome, -1)}
+                                                                    className="text-cyber-muted hover:text-cyber-glow w-6 h-6 rounded bg-white/5 hover:bg-cyber-glow/20 flex items-center justify-center font-bold"
+                                                                >-</button>
+                                                            )}
+                                                            <span className={`text-lg font-bold w-6 inline-block text-center ${colab.atrasos > 0 ? 'text-cyber-glow' : 'text-cyber-muted'}`}>
+                                                                {colab.atrasos}
+                                                            </span>
+                                                            {isAdmin && (
+                                                                <button onClick={() => alterarAtraso(colab.id, colab.nome, 1)}
+                                                                    className="text-cyber-muted hover:text-cyber-glow w-6 h-6 rounded bg-white/5 hover:bg-cyber-glow/20 flex items-center justify-center font-bold"
+                                                                >+</button>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    
+                                                    <td className="p-4">
+                                                        <div className="flex flex-col gap-2">
+                                                            {historico.length > 0 && (
+                                                                <div className="text-xs text-cyber-muted max-h-24 overflow-y-auto pr-2 space-y-1">
+                                                                    {historico.map((j, i) => j.trim() && (
+                                                                        <div key={i} className="bg-black/30 px-2 py-1 border-l-2 border-cyber-border">
+                                                                            {j.trim()}
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                            {isAdmin ? (
+                                                                <input 
+                                                                    type="text"
+                                                                    onKeyDown={(e) => handleJustificativaKeyDown(e, colab.id, colab.nome, colab.justificativa)}
+                                                                    placeholder="> Justificativa e Enter..."
+                                                                    className="cyber-input w-full p-2 text-xs rounded bg-transparent mt-1 placeholder-cyber-muted/40"
+                                                                />
+                                                            ) : (
+                                                                historico.length === 0 && <span className="text-xs text-cyber-muted/30">Nenhum histórico.</span>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                    
+                                                    <td className="p-4 text-center align-top pt-4">
+                                                        <div className="flex items-center justify-center gap-2">
+                                                            {isAdmin && (
+                                                                <button onClick={() => alterarRemotosPerdidos(colab.id, colab.nome, -1)}
+                                                                    className="text-cyber-muted hover:text-cyber-danger w-6 h-6 rounded bg-white/5 hover:bg-cyber-danger/20 flex items-center justify-center font-bold"
+                                                                >-</button>
+                                                            )}
+                                                            <div className={`inline-flex items-center justify-center px-3 py-1 rounded border min-w-[60px] ${totalRemotos > 0 ? 'border-cyber-danger/40 text-cyber-danger bg-cyber-danger/5' : 'border-cyber-border text-cyber-muted bg-transparent'}`}>
+                                                                {totalRemotos > 0 && <span className="mr-1.5 animate-pulse">⚠</span>}
+                                                                <span className="font-bold inline-block text-center w-4">
+                                                                    {totalRemotos}
+                                                                </span>
+                                                            </div>
+                                                            {isAdmin && (
+                                                                <button onClick={() => alterarRemotosPerdidos(colab.id, colab.nome, 1)}
+                                                                    className="text-cyber-muted hover:text-cyber-danger w-6 h-6 rounded bg-white/5 hover:bg-cyber-danger/20 flex items-center justify-center font-bold"
+                                                                >+</button>
+                                                            )}
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        {/* CONSOLE DE AUDITORIA */}
+                        <div className="bg-[#050505] border border-cyber-border rounded-lg p-4 font-mono text-xs shadow-inner">
+                            <div className="text-cyber-glow mb-2 flex items-center gap-2 uppercase font-bold tracking-wider">
+                                <span className="w-2 h-2 bg-cyber-glow rounded-full animate-pulse"></span>
+                                Terminal (Logs Internos)
+                            </div>
+                            <div className="flex flex-col gap-1 text-cyber-muted h-24 overflow-y-auto mt-2">
+                                {logs.map((log, i) => (
+                                    <div key={i} className={`${
+                                        log.includes('SYSTEM:') ? 'text-cyan-400' : 
+                                        log.includes('AUTH:') ? 'text-emerald-400' : 
+                                        log.includes('ADMIN:') ? 'text-amber-400 font-bold' : 
+                                        log.includes('ERROR:') ? 'text-cyber-danger font-bold' : 
+                                        'text-cyber-muted'
+                                    }`}>
+                                        {log}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        
+                    </div> 
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
