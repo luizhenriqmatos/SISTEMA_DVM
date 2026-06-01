@@ -11,7 +11,6 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Bibliotecas para PDF e Email -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
@@ -27,14 +26,9 @@
                     },
                     colors: {
                         cyber: {
-                            bg: '#09090b',
-                            panel: '#111115',
-                            border: '#27272a',
-                            blue: '#1e3a8a',
-                            glow: '#3b82f6',
-                            text: '#e4e4e7',
-                            muted: '#71717a',
-                            danger: '#ef4444'
+                            bg: '#09090b', panel: '#111115', border: '#27272a',
+                            blue: '#1e3a8a', glow: '#3b82f6', text: '#e4e4e7',
+                            muted: '#71717a', danger: '#ef4444'
                         }
                     }
                 }
@@ -54,7 +48,6 @@
         .scanline { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,0) 50%, rgba(0,0,0,0.1) 50%, rgba(0,0,0,0.1)); background-size: 100% 4px; pointer-events: none; z-index: 50; opacity: 0.15; }
     </style>
 
-    <!-- React 18 e Babel Standalone para rodar JSX direto no navegador -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -63,7 +56,6 @@
     <div class="scanline"></div>
     <div id="root"></div>
 
-    <!-- Mapeamento de Módulos ES para Carregar Firebase v11 Nativo no Navegador -->
     <script type="importmap">
       {
         "imports": {
@@ -77,20 +69,15 @@
 
     <script type="text/babel" data-type="module">
         import { initializeApp } from 'firebase/app';
-        import { getAnalytics } from 'firebase/analytics';
-        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+        import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
         import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
         const { useState, useEffect, useRef } = React;
 
-        // Credenciais estáticas para o painel administrativo local
         const ADMIN_USER = "admin";
         const ADMIN_PASS = "admin123";
 
-        // ==========================================
-        // CONFIGURAÇÃO DO FIREBASE (SUAS CREDENCIAIS INSERIDAS AQUI)
-        // ==========================================
-        const configFirebasePadrao = {
+        const firebaseConfig = {
             apiKey: "AIzaSyAAegPv8UxpRUtHDQ6ioux-ZlBjLndpVio",
             authDomain: "banco-de-dados-5542e.firebaseapp.com",
             projectId: "banco-de-dados-5542e",
@@ -100,28 +87,13 @@
             measurementId: "G-3Z5TR8GXRC"
         };
 
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-            ? { ...JSON.parse(__firebase_config), apiKey: configFirebasePadrao.apiKey } 
-            : configFirebasePadrao;
-
-        // Inicializando os módulos com suas credenciais
         const app = initializeApp(firebaseConfig);
-        
-        let analytics;
-        try {
-            analytics = getAnalytics(app);
-        } catch (e) {
-            console.warn("Analytics não suportado neste ambiente");
-        }
-
         const auth = getAuth(app);
         const db = getFirestore(app);
         
-        // Caminho seguro para a coleção (evitando conflitos com regras)
         const DB_COLLECTION = 'dvm_painel_dados';
         const DB_DOC_ID = 'colaboradores_state_main';
 
-        // Colaboradores iniciais caso o banco esteja vazio
         const COLABORADORES_INICIAIS = [
             "André", "Cleyton", "Danilo", "Henrique Lebre", 
             "Henrique Matos", "Kostantinos", "Liesley", 
@@ -135,8 +107,12 @@
         }));
 
         const App = () => {
-            // CORREÇÃO AQUI: Começamos com a lista preenchida para nunca ficar vazio!
-            const [colaboradores, setColaboradores] = useState(COLABORADORES_INICIAIS);
+            // Lógica de Backup: Inicia com o que tem no cache local antes do Firebase carregar
+            const [colaboradores, setColaboradores] = useState(() => {
+                const dadosLocais = localStorage.getItem('dvm_cache_local');
+                return dadosLocais ? JSON.parse(dadosLocais) : COLABORADORES_INICIAIS;
+            });
+            
             const [isAdmin, setIsAdmin] = useState(false);
             const [searchTerm, setSearchTerm] = useState('');
             const [logs, setLogs] = useState([]);
@@ -156,27 +132,22 @@
                 setLogs(prev => [newLog, ...prev].slice(0, 5));
             };
 
-            // 1. Inicializa Conexão e Autenticação com a Nuvem
+            // 1. Inicializa Autenticação
             useEffect(() => {
                 const initAuth = async () => {
                     try {
-                        addLog('SYSTEM: Iniciando conexão com a nuvem...');
-                        // No GitHub Pages usaremos o login Anônimo para ter permissão de ler o banco
                         await signInAnonymously(auth);
                     } catch (err) {
-                        addLog(`ERROR Auth Cloud: Você ativou o login Anônimo no Firebase? (${err.message})`);
+                        addLog(`ERROR Auth: Ative o Login Anônimo no Firebase.`);
                     }
                 };
                 initAuth();
 
                 const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
                     setUser(currentUser);
-                    if (currentUser) {
-                        addLog('SYSTEM: Conectado com sucesso ao Firebase Cloud.');
-                    }
+                    if (currentUser) addLog('SYSTEM: Conexão segura estabelecida com sucesso.');
                 });
 
-                // Carrega status de Admin local da sessão atual
                 if (localStorage.getItem('sysctrl_token') === 'local-admin-granted') {
                     setIsAdmin(true);
                 }
@@ -184,9 +155,9 @@
                 return () => unsubscribe();
             }, []);
 
-            // 2. Escuta mudanças em Tempo Real no Banco de Dados (Sincronização imediata)
+            // 2. Escuta mudanças na Nuvem
             useEffect(() => {
-                if (!user) return; // Só tenta buscar depois de estar autenticado
+                if (!user) return; 
 
                 const docRef = doc(db, DB_COLLECTION, DB_DOC_ID);
 
@@ -195,31 +166,29 @@
                         const cloudData = docSnap.data();
                         if (cloudData && Array.isArray(cloudData.list) && cloudData.list.length > 0) {
                             setColaboradores(cloudData.list);
-                            addLog('CLOUD: Banco atualizado e sincronizado em tempo real.');
+                            localStorage.setItem('dvm_cache_local', JSON.stringify(cloudData.list)); // Atualiza cache
+                            addLog('CLOUD: Dados recebidos da nuvem com sucesso.');
                         }
                     } else {
-                        // Banco está vazio na nuvem: cria o documento com a lista inicial
-                        setDoc(docRef, { list: COLABORADORES_INICIAIS })
-                            .then(() => {
-                                addLog('CLOUD: Banco de dados inicializado pela primeira vez.');
-                            })
-                            .catch(err => {
-                                addLog(`ERROR Gravação Firebase: Verifique as regras do Firestore!`);
-                            });
+                        // Se o banco estiver vazio, usa os dados atuais para popular
+                        setDoc(docRef, { list: colaboradores })
+                            .then(() => addLog('CLOUD: Banco de dados inicializado.'))
+                            .catch(err => addLog(`ERROR Firebase: ${err.message}`));
                     }
                 }, (error) => {
-                    addLog(`ERROR Sincronização: ${error.message}`);
+                    addLog(`ERROR Firebase Read: Bloqueado pelas Regras. Modifique no Console.`);
                 });
 
                 return () => unsubscribe();
             }, [user]);
 
-            // Grava alterações de forma persistente na Nuvem
+            // Gravação Híbrida (Local + Nuvem)
             const atualizarDadosNoBanco = async (novosDados) => {
-                setColaboradores(novosDados); // Atualiza na tela na hora
+                setColaboradores(novosDados); 
+                localStorage.setItem('dvm_cache_local', JSON.stringify(novosDados)); // Salva localmente instantaneamente
                 
                 if (!user) {
-                    addLog('ERROR: Sem conexão de segurança autenticada com Firebase. Salvo apenas localmente.');
+                    addLog('WARNING: Off-line. Salvo apenas no cache local do seu navegador.');
                     return;
                 }
                 
@@ -229,18 +198,14 @@
                     setShowSaved(true);
                     setTimeout(() => setShowSaved(false), 1500);
                 } catch (err) {
-                    addLog(`ERROR Gravando Banco: Verifique as regras do Firestore!`);
+                    addLog(`ERROR Firebase Write: Bloqueado. Aplique as regras de segurança.`);
                 }
             };
 
-            // --- LÓGICA DE ALTERAÇÃO DOS DADOS ---
             const alterarAtraso = (id, nome, delta) => {
                 if (!isAdmin) return;
                 const novosDados = colaboradores.map(colab => {
-                    if (colab.id === id) {
-                        const novoValor = Math.max(0, colab.atrasos + delta);
-                        return { ...colab, atrasos: novoValor };
-                    }
+                    if (colab.id === id) return { ...colab, atrasos: Math.max(0, colab.atrasos + delta) };
                     return colab;
                 });
                 atualizarDadosNoBanco(novosDados);
@@ -250,10 +215,7 @@
             const alterarRemotosPerdidos = (id, nome, delta) => {
                 if (!isAdmin) return;
                 const novosDados = colaboradores.map(colab => {
-                    if (colab.id === id) {
-                        const atual = colab.remotosPerdidos || 0;
-                        return { ...colab, remotosPerdidos: Math.max(0, atual + delta) };
-                    }
+                    if (colab.id === id) return { ...colab, remotosPerdidos: Math.max(0, (colab.remotosPerdidos || 0) + delta) };
                     return colab;
                 });
                 atualizarDadosNoBanco(novosDados);
@@ -267,56 +229,42 @@
                     const novaEntrada = `[${data}] ${text}`;
                     const novoTexto = justificativaAtual ? `${justificativaAtual}; ${novaEntrada}` : novaEntrada;
                     
-                    const novosDados = colaboradores.map(colab => 
-                        colab.id === id ? { ...colab, justificativa: novoTexto } : colab
-                    );
-                    
+                    const novosDados = colaboradores.map(colab => colab.id === id ? { ...colab, justificativa: novoTexto } : colab);
                     atualizarDadosNoBanco(novosDados);
-                    addLog(`ADMIN: Nova justificativa adicionada para ${nome}.`);
+                    addLog(`ADMIN: Justificativa adicionada para ${nome}.`);
                     e.target.value = ''; 
                 }
             };
 
             const zerarSemana = () => {
-                if (window.confirm("ATENÇÃO: Deseja realmente zerar os atrasos e remotos de TODOS os colaboradores na nuvem?")) {
+                if (window.confirm("ATENÇÃO: Deseja zerar os atrasos e remotos de TODOS os colaboradores?")) {
                     const zerados = colaboradores.map(c => ({...c, atrasos: 0, remotosPerdidos: 0, justificativa: ''}));
                     atualizarDadosNoBanco(zerados);
-                    addLog('ADMIN: Semana resetada na nuvem para todos.');
+                    addLog('ADMIN: Semana resetada para todos.');
                 }
             };
 
-            // --- EXPORTAÇÕES E BACKUPS ---
             const exportarDadosJSON = () => {
                 const dadosString = JSON.stringify(colaboradores, null, 2);
                 const blob = new Blob([dadosString], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `dvm_backup_${new Date().toISOString().slice(0,10)}.json`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                addLog('SYSTEM: Backup local exportado.');
+                const a = document.createElement('a'); a.href = url; a.download = `dvm_backup_${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+                addLog('SYSTEM: Backup exportado.');
             };
 
             const importarDadosJSON = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-
                 const reader = new FileReader();
                 reader.onload = (event) => {
                     try {
                         const dadosImportados = JSON.parse(event.target.result);
                         if (Array.isArray(dadosImportados)) {
                             atualizarDadosNoBanco(dadosImportados);
-                            addLog('ADMIN: Backup importado e atualizado na nuvem!');
-                        } else {
-                            addLog('ERROR: Formato de arquivo inválido.');
+                            addLog('ADMIN: Backup importado com sucesso!');
                         }
-                    } catch (err) {
-                        addLog('ERROR: Erro ao ler arquivo.');
-                    }
+                    } catch (err) { addLog('ERROR: Erro ao ler arquivo.'); }
                 };
                 reader.readAsText(file);
             };
@@ -324,162 +272,89 @@
             const gerarDocumentoPDF = () => {
                 const { jsPDF } = window.jspdf;
                 const doc = new jsPDF();
-                doc.setFont("helvetica", "bold");
-                doc.setFontSize(18);
+                doc.setFont("helvetica", "bold"); doc.setFontSize(18);
                 doc.text("SYS.DVM - Relatório de Atrasos e Penalidades", 14, 22);
-                doc.setFontSize(11);
-                doc.setFont("helvetica", "normal");
+                doc.setFontSize(11); doc.setFont("helvetica", "normal");
                 doc.text(`Gerado em: ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}`, 14, 30);
 
-                const tableColumn = ["Colaborador", "Atrasos", "Justificativas", "Remotos Perdidos"];
-                const tableRows = [];
-
-                colaboradores.forEach(colab => {
-                    const remotosManuais = colab.remotosPerdidos || 0;
-                    const totalRemotos = Math.max(0, Math.floor(colab.atrasos / 2) + remotosManuais);
-                    const justificativasStr = colab.justificativa 
-                        ? colab.justificativa.split(';').map(j => j.trim()).join('\n') 
-                        : 'Sem registros';
-                    tableRows.push([colab.nome, colab.atrasos, justificativasStr, totalRemotos]);
+                const tableRows = colaboradores.map(colab => {
+                    const totalRemotos = Math.max(0, Math.floor(colab.atrasos / 2) + (colab.remotosPerdidos || 0));
+                    const justificativasStr = colab.justificativa ? colab.justificativa.split(';').map(j => j.trim()).join('\n') : 'Sem registros';
+                    return [colab.nome, colab.atrasos, justificativasStr, totalRemotos];
                 });
 
                 doc.autoTable({
-                    head: [tableColumn],
-                    body: tableRows,
-                    startY: 35,
-                    theme: 'grid',
-                    styles: { fontSize: 9, cellPadding: 3 },
-                    headStyles: { fillColor: [30, 58, 138] },
-                    columnStyles: { 2: { cellWidth: 80 } }
+                    head: [["Colaborador", "Atrasos", "Justificativas", "Remotos Perdidos"]],
+                    body: tableRows, startY: 35, theme: 'grid', styles: { fontSize: 9, cellPadding: 3 },
+                    headStyles: { fillColor: [30, 58, 138] }, columnStyles: { 2: { cellWidth: 80 } }
                 });
                 return doc;
             };
 
-            const exportarPDF = () => {
-                const doc = gerarDocumentoPDF();
-                doc.save(`dvm_relatorio_${new Date().toISOString().slice(0,10)}.pdf`);
-                addLog('SYSTEM: Relatório PDF baixado.');
-            };
+            const exportarPDF = () => { gerarDocumentoPDF().save(`dvm_relatorio_${new Date().toISOString().slice(0,10)}.pdf`); addLog('SYSTEM: PDF baixado.'); };
 
             const enviarEmail = async (e) => {
                 e.preventDefault();
                 if (!emailDestino) return;
                 const docPdf = gerarDocumentoPDF();
-                const pdfBlob = docPdf.output('blob');
                 const reader = new FileReader();
-
                 reader.onloadend = async () => {
-                    const base64data = reader.result.split(',')[1];
                     try {
                         await emailjs.send('service_hcr466r', 'template_qe7xeau', {
-                            to_email: emailDestino,
-                            message: 'Relatório atualizado do painel SYS.DVM.',
-                            attachment: base64data
+                            to_email: emailDestino, message: 'Relatório atualizado do painel SYS.DVM.', attachment: reader.result.split(',')[1]
                         }, '_WQ4zuCXJ_AQfI4Sf');
-                        addLog(`SYSTEM: Email enviado para ${emailDestino}.`);
-                        setEmailDestino('');
-                    } catch (error) {
-                        addLog('ERROR: Falha de envio via EmailJS.');
-                    }
+                        addLog(`SYSTEM: Email enviado para ${emailDestino}.`); setEmailDestino('');
+                    } catch (error) { addLog('ERROR: Falha de envio via EmailJS.'); }
                 };
-                reader.readAsDataURL(pdfBlob);
+                reader.readAsDataURL(docPdf.output('blob'));
             };
 
-            // --- AUTENTICAÇÃO ADMINISTRATIVA LOCAL ---
             const handleLogin = (e) => {
                 e.preventDefault();
                 if (loginUser === ADMIN_USER && loginPass === ADMIN_PASS) {
-                    setIsAdmin(true);
-                    setLoginError(false);
-                    setLoginUser('');
-                    setLoginPass('');
+                    setIsAdmin(true); setLoginError(false); setLoginUser(''); setLoginPass('');
                     localStorage.setItem('sysctrl_token', 'local-admin-granted');
-                    addLog('AUTH: Acesso administrativo ativado com sucesso.');
+                    addLog('AUTH: Acesso concedido.');
                 } else {
-                    setLoginError(true);
-                    addLog('AUTH: Falha ao autenticar. Credenciais inválidas.');
+                    setLoginError(true); addLog('AUTH: Falha ao autenticar.');
                 }
             };
 
-            const handleLogout = () => {
-                setIsAdmin(false);
-                localStorage.removeItem('sysctrl_token');
-                addLog('AUTH: Sessão de administrador encerrada.');
-            };
+            const handleLogout = () => { setIsAdmin(false); localStorage.removeItem('sysctrl_token'); addLog('AUTH: Logout realizado.'); };
 
-            const colaboradoresFiltrados = colaboradores.filter(c => 
-                c.nome.toLowerCase().includes(searchTerm.toLowerCase())
-            );
+            const colaboradoresFiltrados = colaboradores.filter(c => c.nome.toLowerCase().includes(searchTerm.toLowerCase()));
 
             return (
                 <div className="min-h-screen p-4 md:p-8 font-sans">
                     <div className="max-w-6xl mx-auto">
-                        
-                        {/* HEADER */}
                         <header className="flex flex-col md:flex-row justify-between items-end md:items-center mb-8 pb-4 border-b border-cyber-border gap-4">
                             <div className="flex items-center gap-4 w-full md:w-auto">
                                 <div className="w-3 h-8 bg-cyber-blue animate-pulse"></div>
                                 <div>
-                                    <h1 className="text-xl md:text-2xl font-mono font-bold tracking-tight text-cyber-text">
-                                        SYS.DVM<span className="text-cyber-blue">_</span>
-                                    </h1>
-                                    <p className="text-xs font-mono text-cyber-muted uppercase tracking-widest">
-                                        Atrasos & Penalidades // Realtime Cloud
-                                    </p>
+                                    <h1 className="text-xl md:text-2xl font-mono font-bold tracking-tight text-cyber-text">SYS.DVM<span className="text-cyber-blue">_</span></h1>
+                                    <p className="text-xs font-mono text-cyber-muted uppercase tracking-widest">Atrasos & Penalidades</p>
                                 </div>
                             </div>
-
-                            {/* CONTROLES */}
                             <div className="w-full md:w-auto flex flex-wrap justify-between md:justify-end items-center gap-4">
                                 <div className="flex items-center gap-2 border-r border-cyber-border pr-4 flex-wrap">
-                                    <button 
-                                        onClick={exportarPDF} 
-                                        title="Baixar Relatório PDF"
-                                        className="text-xs font-mono px-3 py-1 border border-cyber-border text-cyber-muted hover:text-cyber-text hover:border-cyber-glow transition-colors"
-                                    >
-                                        [PDF]
-                                    </button>
-                                    
-                                    <button 
-                                        onClick={exportarDadosJSON} 
-                                        title="Backup JSON local"
-                                        className="text-xs font-mono px-3 py-1 border border-cyber-border text-purple-400 hover:border-purple-400 hover:bg-purple-400/10 transition-colors"
-                                    >
-                                        [BACKUP]
-                                    </button>
-
+                                    <button onClick={exportarPDF} className="text-xs font-mono px-3 py-1 border border-cyber-border text-cyber-muted hover:text-cyber-text hover:border-cyber-glow transition-colors">[PDF]</button>
+                                    <button onClick={exportarDadosJSON} className="text-xs font-mono px-3 py-1 border border-cyber-border text-purple-400 hover:border-purple-400 hover:bg-purple-400/10 transition-colors">[BACKUP]</button>
                                     {isAdmin && (
                                         <>
                                             <input type="file" ref={fileInputRef} onChange={importarDadosJSON} accept=".json" className="hidden" />
-                                            <button 
-                                                onClick={() => fileInputRef.current.click()} 
-                                                className="text-xs font-mono px-3 py-1 border border-cyber-border text-amber-500 hover:border-amber-500 hover:bg-amber-500/10 transition-colors"
-                                            >
-                                                [RESTAURAR]
-                                            </button>
+                                            <button onClick={() => fileInputRef.current.click()} className="text-xs font-mono px-3 py-1 border border-cyber-border text-amber-500 hover:border-amber-500 hover:bg-amber-500/10 transition-colors">[RESTAURAR]</button>
                                         </>
                                     )}
-
                                     <form onSubmit={enviarEmail} className="flex gap-1">
-                                        <input type="email" placeholder="AINDA INDISPONIVEL" value={emailDestino} onChange={(e) => setEmailDestino(e.target.value)} className="cyber-input text-xs w-32 px-2 py-1 outline-none font-mono" />
-                                        <button type="submit" className="text-xs font-mono px-2 py-1 border border-cyber-border text-cyber-muted hover:text-cyber-glow transition-colors">
-                                            [ENVIAR]
-                                        </button>
+                                        <input type="email" placeholder="email@gestor.com" value={emailDestino} onChange={(e) => setEmailDestino(e.target.value)} className="cyber-input text-xs w-32 px-2 py-1 outline-none font-mono" />
+                                        <button type="submit" className="text-xs font-mono px-2 py-1 border border-cyber-border text-cyber-muted hover:text-cyber-glow transition-colors">[ENVIAR]</button>
                                     </form>
                                 </div>
-
                                 {isAdmin ? (
                                     <div className="flex items-center gap-3 text-sm font-mono flex-wrap">
-                                        <button onClick={zerarSemana} className="text-xs px-3 py-1 border border-cyber-danger/50 text-cyber-danger hover:bg-cyber-danger/10 transition-colors">
-                                            [RESETAR_BANCO]
-                                        </button>
-                                        <span className="text-emerald-400 flex items-center gap-2 text-xs">
-                                            <span className="w-2 h-2 bg-emerald-400 rounded-full inline-block animate-pulse"></span>
-                                            ADMIN_CLOUD
-                                        </span>
-                                        <button onClick={handleLogout} className="px-3 py-1 text-xs border border-cyber-border hover:border-cyber-danger hover:text-cyber-danger transition-colors text-cyber-muted">
-                                            [SAIR]
-                                        </button>
+                                        <button onClick={zerarSemana} className="text-xs px-3 py-1 border border-cyber-danger/50 text-cyber-danger hover:bg-cyber-danger/10 transition-colors">[RESET_ALL]</button>
+                                        <span className="text-emerald-400 flex items-center gap-2 text-xs"><span className="w-2 h-2 bg-emerald-400 rounded-full inline-block animate-pulse"></span>ADMIN</span>
+                                        <button onClick={handleLogout} className="px-3 py-1 text-xs border border-cyber-border hover:border-cyber-danger hover:text-cyber-danger transition-colors text-cyber-muted">[SAIR]</button>
                                     </div>
                                 ) : (
                                     <form onSubmit={handleLogin} className="flex flex-wrap items-center gap-2 text-xs font-mono">
@@ -492,22 +367,11 @@
                             </div>
                         </header>
 
-                        {/* BARRA DE FILTRO */}
                         <div className="mb-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                            <input 
-                                type="text" 
-                                placeholder="> Buscar colaborador..." 
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="cyber-input w-full md:w-1/3 p-2 text-sm font-mono rounded"
-                            />
-                            
-                            <div className="text-xs font-mono text-cyber-glow bg-cyber-glow/5 border border-cyber-glow/10 px-3 py-2 rounded">
-                                🌐 Sincronização automática em nuvem ativa para todos os navegadores.
-                            </div>
+                            <input type="text" placeholder="> Buscar colaborador..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="cyber-input w-full md:w-1/3 p-2 text-sm font-mono rounded" />
+                            <div className="text-xs font-mono text-cyber-glow bg-cyber-glow/5 border border-cyber-glow/10 px-3 py-2 rounded">🌐 Sincronização Local e Nuvem Ativas.</div>
                         </div>
 
-                        {/* TABELA */}
                         <div className="bg-cyber-panel border border-cyber-border rounded-lg shadow-2xl overflow-hidden mb-6">
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left border-collapse">
@@ -525,73 +389,34 @@
                                         ) : colaboradoresFiltrados.map((colab) => {
                                             const totalRemotos = Math.max(0, Math.floor(colab.atrasos / 2) + (colab.remotosPerdidos || 0));
                                             const historico = colab.justificativa ? colab.justificativa.split(';') : [];
-
                                             return (
                                                 <tr key={colab.id} className="hover:bg-white/[0.02] transition-colors">
-                                                    <td className="p-4 font-sans font-medium text-cyber-text align-top pt-5">
-                                                        {colab.nome}
-                                                    </td>
-                                                    
+                                                    <td className="p-4 font-sans font-medium text-cyber-text align-top pt-5">{colab.nome}</td>
                                                     <td className="p-4 text-center align-top pt-4">
                                                         <div className="flex items-center justify-center gap-2">
-                                                            {isAdmin && (
-                                                                <button onClick={() => alterarAtraso(colab.id, colab.nome, -1)}
-                                                                    className="text-cyber-muted hover:text-cyber-glow w-6 h-6 rounded bg-white/5 hover:bg-cyber-glow/20 flex items-center justify-center font-bold"
-                                                                >-</button>
-                                                            )}
-                                                            <span className={`text-lg font-bold w-6 inline-block text-center ${colab.atrasos > 0 ? 'text-cyber-glow' : 'text-cyber-muted'}`}>
-                                                                {colab.atrasos}
-                                                            </span>
-                                                            {isAdmin && (
-                                                                <button onClick={() => alterarAtraso(colab.id, colab.nome, 1)}
-                                                                    className="text-cyber-muted hover:text-cyber-glow w-6 h-6 rounded bg-white/5 hover:bg-cyber-glow/20 flex items-center justify-center font-bold"
-                                                                >+</button>
-                                                            )}
+                                                            {isAdmin && <button onClick={() => alterarAtraso(colab.id, colab.nome, -1)} className="text-cyber-muted hover:text-cyber-glow w-6 h-6 rounded bg-white/5 hover:bg-cyber-glow/20 flex items-center justify-center font-bold">-</button>}
+                                                            <span className={`text-lg font-bold w-6 inline-block text-center ${colab.atrasos > 0 ? 'text-cyber-glow' : 'text-cyber-muted'}`}>{colab.atrasos}</span>
+                                                            {isAdmin && <button onClick={() => alterarAtraso(colab.id, colab.nome, 1)} className="text-cyber-muted hover:text-cyber-glow w-6 h-6 rounded bg-white/5 hover:bg-cyber-glow/20 flex items-center justify-center font-bold">+</button>}
                                                         </div>
                                                     </td>
-                                                    
                                                     <td className="p-4">
                                                         <div className="flex flex-col gap-2">
                                                             {historico.length > 0 && (
                                                                 <div className="text-xs text-cyber-muted max-h-24 overflow-y-auto pr-2 space-y-1">
-                                                                    {historico.map((j, i) => j.trim() && (
-                                                                        <div key={i} className="bg-black/30 px-2 py-1 border-l-2 border-cyber-border">
-                                                                            {j.trim()}
-                                                                        </div>
-                                                                    ))}
+                                                                    {historico.map((j, i) => j.trim() && <div key={i} className="bg-black/30 px-2 py-1 border-l-2 border-cyber-border">{j.trim()}</div>)}
                                                                 </div>
                                                             )}
-                                                            {isAdmin ? (
-                                                                <input 
-                                                                    type="text"
-                                                                    onKeyDown={(e) => handleJustificativaKeyDown(e, colab.id, colab.nome, colab.justificativa)}
-                                                                    placeholder="> Justificativa e Enter..."
-                                                                    className="cyber-input w-full p-2 text-xs rounded bg-transparent mt-1 placeholder-cyber-muted/40"
-                                                                />
-                                                            ) : (
-                                                                historico.length === 0 && <span className="text-xs text-cyber-muted/30">Nenhum histórico.</span>
-                                                            )}
+                                                            {isAdmin ? <input type="text" onKeyDown={(e) => handleJustificativaKeyDown(e, colab.id, colab.nome, colab.justificativa)} placeholder="> Justificativa e Enter..." className="cyber-input w-full p-2 text-xs rounded bg-transparent mt-1 placeholder-cyber-muted/40" /> : historico.length === 0 && <span className="text-xs text-cyber-muted/30">Nenhum histórico.</span>}
                                                         </div>
                                                     </td>
-                                                    
                                                     <td className="p-4 text-center align-top pt-4">
                                                         <div className="flex items-center justify-center gap-2">
-                                                            {isAdmin && (
-                                                                <button onClick={() => alterarRemotosPerdidos(colab.id, colab.nome, -1)}
-                                                                    className="text-cyber-muted hover:text-cyber-danger w-6 h-6 rounded bg-white/5 hover:bg-cyber-danger/20 flex items-center justify-center font-bold"
-                                                                >-</button>
-                                                            )}
+                                                            {isAdmin && <button onClick={() => alterarRemotosPerdidos(colab.id, colab.nome, -1)} className="text-cyber-muted hover:text-cyber-danger w-6 h-6 rounded bg-white/5 hover:bg-cyber-danger/20 flex items-center justify-center font-bold">-</button>}
                                                             <div className={`inline-flex items-center justify-center px-3 py-1 rounded border min-w-[60px] ${totalRemotos > 0 ? 'border-cyber-danger/40 text-cyber-danger bg-cyber-danger/5' : 'border-cyber-border text-cyber-muted bg-transparent'}`}>
                                                                 {totalRemotos > 0 && <span className="mr-1.5 animate-pulse">⚠</span>}
-                                                                <span className="font-bold inline-block text-center w-4">
-                                                                    {totalRemotos}
-                                                                </span>
+                                                                <span className="font-bold inline-block text-center w-4">{totalRemotos}</span>
                                                             </div>
-                                                            {isAdmin && (
-                                                                <button onClick={() => alterarRemotosPerdidos(colab.id, colab.nome, 1)}
-                                                                    className="text-cyber-muted hover:text-cyber-danger w-6 h-6 rounded bg-white/5 hover:bg-cyber-danger/20 flex items-center justify-center font-bold"
-                                                                >+</button>
-                                                            )}
+                                                            {isAdmin && <button onClick={() => alterarRemotosPerdidos(colab.id, colab.nome, 1)} className="text-cyber-muted hover:text-cyber-danger w-6 h-6 rounded bg-white/5 hover:bg-cyber-danger/20 flex items-center justify-center font-bold">+</button>}
                                                         </div>
                                                     </td>
                                                 </tr>
@@ -602,18 +427,12 @@
                             </div>
                         </div>
 
-                        {/* CONSOLE DE AUDITORIA */}
                         <div className="bg-[#050505] border border-cyber-border rounded-lg p-4 font-mono text-xs shadow-inner">
                             <div className="text-cyber-glow mb-2 flex items-center gap-2 uppercase font-bold tracking-wider">
-                                <span className="w-2 h-2 bg-cyber-glow rounded-full animate-pulse"></span>
-                                Log_Streamer
+                                <span className="w-2 h-2 bg-cyber-glow rounded-full animate-pulse"></span>Log_Terminal
                             </div>
                             <div className="flex flex-col gap-1 text-cyber-muted h-20 overflow-hidden">
-                                {logs.map((log, i) => (
-                                    <div key={i} className={`${log.includes('AUTH:') ? 'text-emerald-400' : log.includes('ADMIN:') ? 'text-cyber-text' : log.includes('ERROR:') ? 'text-cyber-danger' : 'text-cyber-muted'}`}>
-                                        {log}
-                                    </div>
-                                ))}
+                                {logs.map((log, i) => <div key={i} className={`${log.includes('AUTH:') ? 'text-emerald-400' : log.includes('ADMIN:') ? 'text-cyber-text' : log.includes('ERROR:') ? 'text-cyber-danger' : 'text-cyber-muted'}`}>{log}</div>)}
                             </div>
                         </div>
                         
